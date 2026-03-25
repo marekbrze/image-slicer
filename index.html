@@ -78,6 +78,123 @@
     overflow: hidden;
   }
 
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 190px;
+    flex-shrink: 0;
+    background: #141414;
+    border-right: 1px solid #222;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebar-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #444;
+    flex-shrink: 0;
+  }
+
+  .sidebar-section-header .btn-sidebar-add {
+    background: transparent;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 2px;
+    border-radius: 3px;
+  }
+  .sidebar-section-header .btn-sidebar-add:hover { color: #aaa; background: #222; }
+
+  #project-list,
+  #image-list {
+    list-style: none;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  #project-list {
+    border-bottom: 1px solid #1e1e1e;
+    max-height: 40%;
+  }
+
+  #image-list { flex: 1; overflow-y: auto; }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: #777;
+    cursor: pointer;
+    gap: 6px;
+  }
+
+  .sidebar-item:hover { background: #1c1c1c; color: #ccc; }
+
+  .sidebar-item.active {
+    background: #1e2a3a;
+    color: #e0e0e0;
+  }
+
+  .sidebar-item .item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sidebar-item input.rename-input {
+    flex: 1;
+    background: #2a2a2a;
+    border: 1px solid #3b82f6;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    padding: 1px 4px;
+    outline: none;
+    min-width: 0;
+  }
+
+  .sidebar-item .item-remove {
+    opacity: 0;
+    font-size: 13px;
+    color: #555;
+    cursor: pointer;
+    flex-shrink: 0;
+    line-height: 1;
+    padding: 1px 3px;
+    border-radius: 3px;
+  }
+
+  .sidebar-item:hover .item-remove { opacity: 1; }
+  .sidebar-item .item-remove:hover  { color: #f43f5e; background: #2a1a1e; }
+
+  .sidebar-item .item-thumb {
+    width: 28px;
+    height: 20px;
+    object-fit: cover;
+    border-radius: 2px;
+    background: #2a2a2a;
+    flex-shrink: 0;
+  }
+
+  /* Scrollbars in sidebar */
+  #project-list::-webkit-scrollbar,
+  #image-list::-webkit-scrollbar { width: 4px; }
+  #project-list::-webkit-scrollbar-track,
+  #image-list::-webkit-scrollbar-track { background: transparent; }
+  #project-list::-webkit-scrollbar-thumb,
+  #image-list::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+
   /* ── Panels ── */
   .panel {
     flex: 1;
@@ -272,12 +389,28 @@
   <h1>Image Slicer</h1>
   <span class="hint">Click on image to add cut lines · Drag to move · Double-click to remove</span>
   <span class="spacer"></span>
-  <button class="btn btn-ghost btn-sm" id="btn-clear" style="display:none">Clear</button>
-  <button class="btn btn-primary btn-sm" id="btn-upload">Upload image</button>
+  <button class="btn btn-primary btn-sm" id="btn-upload">Add image</button>
   <input type="file" id="file-input" accept="image/*" style="display:none">
 </header>
 
 <main>
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div class="sidebar-section-header">
+      Projects
+      <button class="btn-sidebar-add" id="btn-new-project" title="New project">+</button>
+    </div>
+    <ul id="project-list"></ul>
+
+    <div class="sidebar-section-header" id="images-heading">
+      Images
+      <button class="btn-sidebar-add" id="btn-add-image" title="Add image">+</button>
+    </div>
+    <ul id="image-list"></ul>
+  </div>
+
+  <div class="divider"></div>
+
   <!-- LEFT PANEL -->
   <div class="panel" id="left-panel">
     <div class="panel-header">
@@ -317,75 +450,294 @@
 <script>
 // ─── State ────────────────────────────────────────────────────────────────────
 const state = {
-  imageDataUrl: null,
-  // lines stored as fractions (0..1) of original image height
-  lines: []
+  projects: [],
+  activeProject: 0,
+  activeImage: 0
 };
 
+function currentProject() {
+  return state.projects[state.activeProject] ?? null;
+}
+
+function currentImage() {
+  return currentProject()?.images[state.activeImage] ?? null;
+}
+
+function ensureActiveIndicesValid() {
+  if (state.projects.length === 0) return;
+  state.activeProject = Math.max(0, Math.min(state.activeProject, state.projects.length - 1));
+  const proj = currentProject();
+  if (proj) {
+    state.activeImage = Math.max(0, Math.min(state.activeImage, proj.images.length - 1));
+    if (proj.images.length === 0) state.activeImage = 0;
+  }
+}
+
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
-const fileInput      = document.getElementById('file-input');
-const btnUpload      = document.getElementById('btn-upload');
-const btnClear       = document.getElementById('btn-clear');
-const dropZone       = document.getElementById('drop-zone');
-const editorWrap     = document.getElementById('editor-wrap');
-const sourceImg      = document.getElementById('source-img');
-const rightBody      = document.getElementById('right-body');
-const lineCountEl    = document.getElementById('line-count');
-const sliceCountEl   = document.getElementById('slice-count');
-const emptyRight     = document.getElementById('empty-right');
+const fileInput       = document.getElementById('file-input');
+const btnUpload       = document.getElementById('btn-upload');
+const btnNewProject   = document.getElementById('btn-new-project');
+const btnAddImage     = document.getElementById('btn-add-image');
+const projectList     = document.getElementById('project-list');
+const imageList       = document.getElementById('image-list');
+const imagesHeading   = document.getElementById('images-heading');
+const dropZone        = document.getElementById('drop-zone');
+const editorWrap      = document.getElementById('editor-wrap');
+const sourceImg       = document.getElementById('source-img');
+const rightBody       = document.getElementById('right-body');
+const lineCountEl     = document.getElementById('line-count');
+const sliceCountEl    = document.getElementById('slice-count');
+const emptyRight      = document.getElementById('empty-right');
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
 function save() {
   try {
-    localStorage.setItem('slicer_image', state.imageDataUrl || '');
-    localStorage.setItem('slicer_lines', JSON.stringify(state.lines));
+    localStorage.setItem('slicer_v2', JSON.stringify(state));
   } catch (e) {
     // storage quota exceeded (large images) — ignore
   }
 }
 
 function load() {
-  const img   = localStorage.getItem('slicer_image');
-  const lines = localStorage.getItem('slicer_lines');
-  if (img) {
-    state.imageDataUrl = img;
-    state.lines = lines ? JSON.parse(lines) : [];
-    applyImage();
+  // Try new format
+  const raw = localStorage.getItem('slicer_v2');
+  if (raw) {
+    try {
+      const saved = JSON.parse(raw);
+      Object.assign(state, saved);
+      return;
+    } catch (e) {}
+  }
+
+  // Migrate from old format
+  const oldImg   = localStorage.getItem('slicer_image');
+  const oldLines = localStorage.getItem('slicer_lines');
+  if (oldImg) {
+    state.projects = [{
+      name: 'Project 1',
+      images: [{
+        name: 'image',
+        dataUrl: oldImg,
+        lines: oldLines ? JSON.parse(oldLines) : []
+      }]
+    }];
+    state.activeProject = 0;
+    state.activeImage = 0;
+    localStorage.removeItem('slicer_image');
+    localStorage.removeItem('slicer_lines');
+    save();
   }
 }
 
-// ─── Image loading ────────────────────────────────────────────────────────────
-function loadFile(file) {
+// ─── Project operations ───────────────────────────────────────────────────────
+function createProject(name) {
+  state.projects.push({ name, images: [] });
+  state.activeProject = state.projects.length - 1;
+  state.activeImage = 0;
+  save();
+  render();
+}
+
+function switchProject(idx) {
+  state.activeProject = idx;
+  state.activeImage = 0;
+  save();
+  render();
+}
+
+function renameProject(idx, newName) {
+  state.projects[idx].name = newName.trim() || `Project ${idx + 1}`;
+  save();
+  renderProjectList();
+}
+
+function removeProject(idx) {
+  state.projects.splice(idx, 1);
+  if (state.projects.length === 0) {
+    state.projects.push({ name: 'Project 1', images: [] });
+  }
+  ensureActiveIndicesValid();
+  save();
+  render();
+}
+
+// ─── Image operations ─────────────────────────────────────────────────────────
+function addImageToProject(file) {
   if (!file || !file.type.startsWith('image/')) return;
+  if (!currentProject()) createProject('Project 1');
   const reader = new FileReader();
   reader.onload = e => {
-    state.imageDataUrl = e.target.result;
-    state.lines = [];
+    currentProject().images.push({
+      name: file.name,
+      dataUrl: e.target.result,
+      lines: []
+    });
+    state.activeImage = currentProject().images.length - 1;
     save();
-    applyImage();
+    render();
   };
   reader.readAsDataURL(file);
 }
 
-function applyImage() {
-  sourceImg.onload = () => {
-    dropZone.style.display  = 'none';
+function switchImage(idx) {
+  state.activeImage = idx;
+  save();
+  render();
+}
+
+function renameImage(projIdx, imgIdx, newName) {
+  state.projects[projIdx].images[imgIdx].name = newName.trim() || 'image';
+  save();
+  renderImageList();
+}
+
+function removeImage(projIdx, imgIdx) {
+  state.projects[projIdx].images.splice(imgIdx, 1);
+  ensureActiveIndicesValid();
+  save();
+  render();
+}
+
+// ─── Inline rename helper ────────────────────────────────────────────────────
+function startRename(nameSpan, onCommit) {
+  const original = nameSpan.textContent;
+  const input = document.createElement('input');
+  input.className = 'rename-input';
+  input.value = original;
+  nameSpan.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let committed = false;
+  function commit() {
+    if (committed) return;
+    committed = true;
+    onCommit(input.value.trim() || original);
+  }
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { committed = true; onCommit(original); }
+  });
+  input.addEventListener('blur', commit);
+}
+
+// ─── Render coordinator ───────────────────────────────────────────────────────
+function render() {
+  renderProjectList();
+  renderImageList();
+  renderEditor();
+}
+
+function renderProjectList() {
+  projectList.innerHTML = '';
+  state.projects.forEach((proj, i) => {
+    const li = document.createElement('li');
+    li.className = 'sidebar-item' + (i === state.activeProject ? ' active' : '');
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'item-name';
+    nameSpan.textContent = proj.name;
+    nameSpan.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      startRename(nameSpan, val => renameProject(i, val));
+    });
+
+    const removeBtn = document.createElement('span');
+    removeBtn.className = 'item-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove project';
+    removeBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      removeProject(i);
+    });
+
+    li.appendChild(nameSpan);
+    li.appendChild(removeBtn);
+    li.addEventListener('click', () => switchProject(i));
+    projectList.appendChild(li);
+  });
+}
+
+function renderImageList() {
+  imageList.innerHTML = '';
+  const proj = currentProject();
+
+  if (!proj) return;
+
+  proj.images.forEach((img, i) => {
+    const li = document.createElement('li');
+    li.className = 'sidebar-item' + (i === state.activeImage ? ' active' : '');
+
+    const thumb = document.createElement('img');
+    thumb.className = 'item-thumb';
+    thumb.src = img.dataUrl;
+    thumb.alt = '';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'item-name';
+    nameSpan.textContent = img.name;
+    nameSpan.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      startRename(nameSpan, val => renameImage(state.activeProject, i, val));
+    });
+
+    const removeBtn = document.createElement('span');
+    removeBtn.className = 'item-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove image';
+    removeBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      removeImage(state.activeProject, i);
+    });
+
+    li.appendChild(thumb);
+    li.appendChild(nameSpan);
+    li.appendChild(removeBtn);
+    li.addEventListener('click', () => switchImage(i));
+    imageList.appendChild(li);
+  });
+}
+
+function renderEditor() {
+  const img = currentImage();
+  if (!img) {
+    dropZone.style.display   = '';
+    editorWrap.style.display = 'none';
+    rightBody.innerHTML      = '';
+    rightBody.appendChild(emptyRight);
+    emptyRight.style.display = '';
+    lineCountEl.textContent  = '0 lines';
+    sliceCountEl.textContent = '0';
+    return;
+  }
+
+  if (sourceImg.src === img.dataUrl) {
+    dropZone.style.display   = 'none';
     editorWrap.style.display = 'inline-block';
-    btnClear.style.display  = '';
     renderLines();
     renderSlices();
-  };
-  sourceImg.src = state.imageDataUrl;
+  } else {
+    sourceImg.onload = () => {
+      dropZone.style.display   = 'none';
+      editorWrap.style.display = 'inline-block';
+      renderLines();
+      renderSlices();
+    };
+    sourceImg.src = img.dataUrl;
+  }
 }
 
 // ─── Lines rendering ──────────────────────────────────────────────────────────
 function renderLines() {
-  // Remove old line elements
   editorWrap.querySelectorAll('.slice-line').forEach(el => el.remove());
+
+  const img = currentImage();
+  if (!img) return;
 
   const imgH = sourceImg.offsetHeight;
 
-  state.lines.forEach((frac, idx) => {
+  img.lines.forEach((frac, idx) => {
     const top = frac * imgH;
     const line = document.createElement('div');
     line.className = 'slice-line';
@@ -411,7 +763,7 @@ function renderLines() {
     editorWrap.appendChild(line);
   });
 
-  const n = state.lines.length;
+  const n = img.lines.length;
   lineCountEl.textContent = n === 1 ? '1 line' : `${n} lines`;
 }
 
@@ -424,7 +776,7 @@ function makeDraggable(lineEl, idx) {
     e.preventDefault();
     dragging = true;
     startY = e.clientY;
-    startFrac = state.lines[idx];
+    startFrac = currentImage().lines[idx];
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   });
@@ -440,7 +792,7 @@ function makeDraggable(lineEl, idx) {
     const delta = e.clientY - startY;
     let newFrac = startFrac + delta / imgH;
     newFrac = Math.max(0.001, Math.min(0.999, newFrac));
-    state.lines[idx] = newFrac;
+    currentImage().lines[idx] = newFrac;
     lineEl.style.top = (newFrac * imgH) + 'px';
     renderSlices();
   }
@@ -450,7 +802,7 @@ function makeDraggable(lineEl, idx) {
     dragging = false;
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
-    state.lines.sort((a, b) => a - b);
+    currentImage().lines.sort((a, b) => a - b);
     save();
     renderLines();
     renderSlices();
@@ -459,15 +811,19 @@ function makeDraggable(lineEl, idx) {
 
 // ─── Add / remove lines ───────────────────────────────────────────────────────
 function addLine(frac) {
-  state.lines.push(frac);
-  state.lines.sort((a, b) => a - b);
+  const img = currentImage();
+  if (!img) return;
+  img.lines.push(frac);
+  img.lines.sort((a, b) => a - b);
   save();
   renderLines();
   renderSlices();
 }
 
 function removeLine(idx) {
-  state.lines.splice(idx, 1);
+  const img = currentImage();
+  if (!img) return;
+  img.lines.splice(idx, 1);
   save();
   renderLines();
   renderSlices();
@@ -486,16 +842,15 @@ editorWrap.addEventListener('click', e => {
 
 // ─── Slices rendering ─────────────────────────────────────────────────────────
 function renderSlices() {
-  if (!state.imageDataUrl) return;
+  const img = currentImage();
+  if (!img) return;
 
   const imgEl  = sourceImg;
   const origW  = imgEl.naturalWidth;
   const origH  = imgEl.naturalHeight;
 
-  // Build cut points in original pixels
-  const cuts = [0, ...state.lines.map(f => Math.round(f * origH)), origH];
+  const cuts = [0, ...img.lines.map(f => Math.round(f * origH)), origH];
 
-  // Clear right panel
   rightBody.innerHTML = '';
 
   if (cuts.length < 2) {
@@ -508,9 +863,10 @@ function renderSlices() {
   sliceCountEl.textContent = String(sliceCount);
   emptyRight.style.display = 'none';
 
-  // We need the actual image bitmap for canvas drawing
+  const baseName = img.name.replace(/\.[^.]+$/, '') || 'image';
+
   const bitmapImg = new Image();
-  bitmapImg.src = state.imageDataUrl;
+  bitmapImg.src = img.dataUrl;
 
   const draw = () => {
     for (let i = 0; i < sliceCount; i++) {
@@ -542,7 +898,7 @@ function renderSlices() {
       dlBtn.addEventListener('click', () => {
         const a = document.createElement('a');
         a.href     = canvas.toDataURL('image/png');
-        a.download = `slice-${i + 1}.png`;
+        a.download = `${baseName}-slice-${i + 1}.png`;
         a.click();
       });
 
@@ -561,7 +917,11 @@ function renderSlices() {
 
 // ─── Upload controls ──────────────────────────────────────────────────────────
 btnUpload.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => loadFile(fileInput.files[0]));
+btnAddImage.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  addImageToProject(fileInput.files[0]);
+  fileInput.value = '';
+});
 
 dropZone.addEventListener('click', () => fileInput.click());
 
@@ -573,51 +933,40 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  loadFile(e.dataTransfer.files[0]);
+  addImageToProject(e.dataTransfer.files[0]);
 });
 
-// Drag & drop onto editor wrap (when image already loaded)
 document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => {
   e.preventDefault();
-  loadFile(e.dataTransfer.files[0]);
+  addImageToProject(e.dataTransfer.files[0]);
 });
 
-// Paste
 document.addEventListener('paste', e => {
   const items = e.clipboardData?.items;
   if (!items) return;
   for (const item of items) {
     if (item.type.startsWith('image/')) {
-      loadFile(item.getAsFile());
+      addImageToProject(item.getAsFile());
       break;
     }
   }
 });
 
-// Clear
-btnClear.addEventListener('click', () => {
-  state.imageDataUrl = null;
-  state.lines = [];
-  localStorage.removeItem('slicer_image');
-  localStorage.removeItem('slicer_lines');
-  editorWrap.style.display = 'none';
-  dropZone.style.display = '';
-  btnClear.style.display = 'none';
-  rightBody.innerHTML = '';
-  rightBody.appendChild(emptyRight);
-  emptyRight.style.display = '';
-  lineCountEl.textContent  = '0 lines';
-  sliceCountEl.textContent = '0';
+btnNewProject.addEventListener('click', () => {
+  createProject(`Project ${state.projects.length + 1}`);
 });
 
-// Re-render lines when window resizes (they're position-dependent on display size)
 window.addEventListener('resize', () => {
-  if (state.imageDataUrl) renderLines();
+  if (currentImage()) renderLines();
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
+if (state.projects.length === 0) {
+  state.projects.push({ name: 'Project 1', images: [] });
+}
 load();
+render();
 </script>
 </body>
 </html>
