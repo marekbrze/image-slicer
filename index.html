@@ -342,6 +342,64 @@
     pointer-events: none;
   }
 
+  /* ── Trim handles ── */
+  .trim-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #f43f5e;
+    cursor: ew-resize;
+    z-index: 11;
+  }
+
+  .trim-line::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    left: -6px; right: -6px;
+  }
+
+  .trim-handle {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 14px;
+    height: 22px;
+    background: #f43f5e;
+    border-radius: 4px;
+    cursor: ew-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .trim-handle::after {
+    content: '';
+    display: block;
+    width: 2px;
+    height: 10px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 1px;
+    box-shadow: 3px 0 0 rgba(255,255,255,0.5), -3px 0 0 rgba(255,255,255,0.5);
+  }
+
+  .trim-overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    pointer-events: none;
+    z-index: 9;
+  }
+
+  .btn-ghost.trim-active {
+    color: #f43f5e;
+    border-color: rgba(244,63,94,0.4);
+  }
+  .btn-ghost.trim-active:hover { background: rgba(244,63,94,0.08); }
+
   /* ── Right panel slices ── */
   .slice-item {
     margin-bottom: 16px;
@@ -599,7 +657,10 @@ function addImageToProject(file) {
     currentProject().images.push({
       name: nameWithoutExt,
       dataUrl: e.target.result,
-      lines: []
+      lines: [],
+      trimLeft: 0,
+      trimRight: 1,
+      sliceTrimDisabled: []
     });
     state.activeImage = currentProject().images.length - 1;
     _pendingRename = 'image';
@@ -818,12 +879,14 @@ function renderEditor() {
     dropZone.style.display   = 'none';
     editorWrap.style.display = 'inline-block';
     renderLines();
+    renderTrimHandles();
     renderSlices();
   } else {
     sourceImg.onload = () => {
       dropZone.style.display   = 'none';
       editorWrap.style.display = 'inline-block';
       renderLines();
+      renderTrimHandles();
       renderSlices();
     };
     sourceImg.src = img.dataUrl;
@@ -869,6 +932,47 @@ function renderLines() {
   lineCountEl.textContent = n === 1 ? '1 line' : `${n} lines`;
 }
 
+// ─── Trim handles rendering ───────────────────────────────────────────────────
+function renderTrimHandles() {
+  editorWrap.querySelectorAll('.trim-line, .trim-overlay').forEach(el => el.remove());
+
+  const img = currentImage();
+  if (!img) return;
+
+  const imgW     = sourceImg.offsetWidth;
+  const leftFrac  = img.trimLeft  ?? 0;
+  const rightFrac = img.trimRight ?? 1;
+
+  if (leftFrac > 0) {
+    const o = document.createElement('div');
+    o.className = 'trim-overlay';
+    o.style.left  = '0';
+    o.style.width = (leftFrac * imgW) + 'px';
+    editorWrap.appendChild(o);
+  }
+
+  if (rightFrac < 1) {
+    const o = document.createElement('div');
+    o.className = 'trim-overlay';
+    o.style.left  = (rightFrac * imgW) + 'px';
+    o.style.right = '0';
+    editorWrap.appendChild(o);
+  }
+
+  ['left', 'right'].forEach(side => {
+    const frac = side === 'left' ? leftFrac : rightFrac;
+    const line = document.createElement('div');
+    line.className = 'trim-line';
+    line.dataset.side = side;
+    line.style.left = (frac * imgW) + 'px';
+    const knob = document.createElement('div');
+    knob.className = 'trim-handle';
+    line.appendChild(knob);
+    makeTrimDraggable(line, side);
+    editorWrap.appendChild(line);
+  });
+}
+
 // ─── Dragging lines ───────────────────────────────────────────────────────────
 function makeDraggable(lineEl, idx) {
   let startY, startFrac, dragging = false;
@@ -911,12 +1015,84 @@ function makeDraggable(lineEl, idx) {
   }
 }
 
+// ─── Trim dragging ────────────────────────────────────────────────────────────
+function makeTrimDraggable(trimEl, side) {
+  let startX, startFrac, dragging = false;
+
+  trimEl.addEventListener('mousedown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragging = true;
+    startX = e.clientX;
+    const img = currentImage();
+    startFrac = side === 'left' ? (img.trimLeft ?? 0) : (img.trimRight ?? 1);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  function onMove(e) {
+    if (!dragging) return;
+    const imgW = sourceImg.offsetWidth;
+    const delta = e.clientX - startX;
+    let newFrac = startFrac + delta / imgW;
+
+    const img = currentImage();
+    if (side === 'left') {
+      newFrac = Math.max(0, Math.min((img.trimRight ?? 1) - 0.02, newFrac));
+      img.trimLeft = newFrac;
+    } else {
+      newFrac = Math.max((img.trimLeft ?? 0) + 0.02, Math.min(1, newFrac));
+      img.trimRight = newFrac;
+    }
+
+    trimEl.style.left = (newFrac * imgW) + 'px';
+
+    // update overlays in-place without rebuilding trim lines
+    editorWrap.querySelectorAll('.trim-overlay').forEach(el => el.remove());
+    const lf = img.trimLeft  ?? 0;
+    const rf = img.trimRight ?? 1;
+    if (lf > 0) {
+      const o = document.createElement('div');
+      o.className = 'trim-overlay';
+      o.style.left  = '0';
+      o.style.width = (lf * imgW) + 'px';
+      editorWrap.insertBefore(o, editorWrap.firstChild);
+    }
+    if (rf < 1) {
+      const o = document.createElement('div');
+      o.className = 'trim-overlay';
+      o.style.left  = (rf * imgW) + 'px';
+      o.style.right = '0';
+      editorWrap.insertBefore(o, editorWrap.firstChild);
+    }
+
+    renderSlices();
+  }
+
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    save();
+    renderTrimHandles();
+    renderSlices();
+  }
+}
+
 // ─── Slice names helpers ──────────────────────────────────────────────────────
 function ensureSliceNames(img) {
   if (!img.sliceNames) img.sliceNames = [];
   const needed = img.lines.length + 1;
   while (img.sliceNames.length < needed) img.sliceNames.push('');
   if (img.sliceNames.length > needed) img.sliceNames.length = needed;
+}
+
+function ensureSliceTrimDisabled(img) {
+  if (!img.sliceTrimDisabled) img.sliceTrimDisabled = [];
+  const needed = img.lines.length + 1;
+  while (img.sliceTrimDisabled.length < needed) img.sliceTrimDisabled.push(false);
+  if (img.sliceTrimDisabled.length > needed) img.sliceTrimDisabled.length = needed;
 }
 
 function renameSlice(sliceIdx, newName) {
@@ -932,11 +1108,13 @@ function renameSlice(sliceIdx, newName) {
 function addLine(frac) {
   const img = currentImage();
   if (!img) return;
-  ensureSliceNames(img);                         // sync before adding
+  ensureSliceNames(img);
+  ensureSliceTrimDisabled(img);
   img.lines.push(frac);
   img.lines.sort((a, b) => a - b);
   const newIdx = img.lines.indexOf(frac);
-  img.sliceNames.splice(newIdx + 1, 0, '');      // insert blank name for new slice
+  img.sliceNames.splice(newIdx + 1, 0, '');
+  img.sliceTrimDisabled.splice(newIdx + 1, 0, false);
   save();
   renderLines();
   renderSlices();
@@ -946,8 +1124,10 @@ function removeLine(idx) {
   const img = currentImage();
   if (!img) return;
   ensureSliceNames(img);
+  ensureSliceTrimDisabled(img);
   img.lines.splice(idx, 1);
-  img.sliceNames.splice(idx + 1, 1);             // remove name of the slice after the line
+  img.sliceNames.splice(idx + 1, 1);
+  img.sliceTrimDisabled.splice(idx + 1, 1);
   save();
   renderLines();
   renderSlices();
@@ -957,7 +1137,10 @@ function removeLine(idx) {
 editorWrap.addEventListener('click', e => {
   if (e.target.classList.contains('slice-line') ||
       e.target.classList.contains('line-handle') ||
-      e.target.classList.contains('line-label')) return;
+      e.target.classList.contains('line-label') ||
+      e.target.classList.contains('trim-line') ||
+      e.target.classList.contains('trim-handle') ||
+      e.target.closest('.trim-line')) return;
   const rect = editorWrap.getBoundingClientRect();
   const y    = e.clientY - rect.top;
   const frac = y / sourceImg.offsetHeight;
@@ -990,6 +1173,7 @@ function renderSlices() {
   const projName = safeFilename(currentProject()?.name || 'project');
   const baseName = safeFilename(img.name || 'image');
   ensureSliceNames(img);
+  ensureSliceTrimDisabled(img);
 
   const bitmapImg = new Image();
   bitmapImg.src = img.dataUrl;
@@ -999,6 +1183,14 @@ function renderSlices() {
       const srcY = cuts[i];
       const srcH = cuts[i + 1] - cuts[i];
       if (srcH <= 0) continue;
+
+      // Compute trim bounds
+      const hasTrim = (img.trimLeft ?? 0) > 0 || (img.trimRight ?? 1) < 1;
+      const trimDisabled = img.sliceTrimDisabled[i] ?? false;
+      const tLeft  = (!hasTrim || trimDisabled) ? 0     : Math.round((img.trimLeft  ?? 0) * origW);
+      const tRight = (!hasTrim || trimDisabled) ? origW : Math.round((img.trimRight ?? 1) * origW);
+      const trimW  = tRight - tLeft;
+      if (trimW <= 0) continue;
 
       const item = document.createElement('div');
       item.className = 'slice-item';
@@ -1017,7 +1209,7 @@ function renderSlices() {
 
       const dims = document.createElement('span');
       dims.className = 'slice-dims';
-      dims.textContent = `${origW} × ${srcH}px`;
+      dims.textContent = `${trimW} × ${srcH}px`;
       hdr.appendChild(dims);
 
       const dlBtn = document.createElement('button');
@@ -1026,10 +1218,10 @@ function renderSlices() {
       hdr.appendChild(dlBtn);
 
       const canvas = document.createElement('canvas');
-      canvas.width  = origW;
+      canvas.width  = trimW;
       canvas.height = srcH;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(bitmapImg, 0, srcY, origW, srcH, 0, 0, origW, srcH);
+      ctx.drawImage(bitmapImg, tLeft, srcY, trimW, srcH, 0, 0, trimW, srcH);
 
       dlBtn.addEventListener('click', () => {
         const sliceName = img.sliceNames[i];
@@ -1059,6 +1251,21 @@ function renderSlices() {
         });
       });
       hdr.appendChild(copyBtn);
+
+      // Trim toggle button (only when trim is active on image)
+      if (hasTrim) {
+        const trimBtn = document.createElement('button');
+        trimBtn.className = 'btn btn-ghost btn-sm' + (trimDisabled ? '' : ' trim-active');
+        trimBtn.textContent = trimDisabled ? '⬚ Trim off' : '⬚ Trim on';
+        trimBtn.title = trimDisabled ? 'Trim disabled for this slice — click to enable' : 'Trim enabled — click to disable for this slice';
+        trimBtn.addEventListener('click', () => {
+          ensureSliceTrimDisabled(img);
+          img.sliceTrimDisabled[i] = !img.sliceTrimDisabled[i];
+          save();
+          renderSlices();
+        });
+        hdr.appendChild(trimBtn);
+      }
 
       item.appendChild(hdr);
       item.appendChild(canvas);
@@ -1116,7 +1323,7 @@ btnNewProject.addEventListener('click', () => {
 });
 
 window.addEventListener('resize', () => {
-  if (currentImage()) renderLines();
+  if (currentImage()) { renderLines(); renderTrimHandles(); }
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
