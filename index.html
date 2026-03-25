@@ -164,19 +164,22 @@
     min-width: 0;
   }
 
+  .sidebar-item .item-edit,
   .sidebar-item .item-remove {
     opacity: 0;
-    font-size: 13px;
+    font-size: 11px;
     color: #555;
     cursor: pointer;
     flex-shrink: 0;
     line-height: 1;
-    padding: 1px 3px;
+    padding: 2px 3px;
     border-radius: 3px;
   }
 
+  .sidebar-item:hover .item-edit,
   .sidebar-item:hover .item-remove { opacity: 1; }
-  .sidebar-item .item-remove:hover  { color: #f43f5e; background: #2a1a1e; }
+  .sidebar-item .item-edit:hover   { color: #60a5fa; background: #1a243a; }
+  .sidebar-item .item-remove:hover { color: #f43f5e; background: #2a1a1e; }
 
   .sidebar-item .item-thumb {
     width: 28px;
@@ -530,10 +533,11 @@ function load() {
 }
 
 // ─── Project operations ───────────────────────────────────────────────────────
-function createProject(name) {
+function createProject(name, { autoRename = false } = {}) {
   state.projects.push({ name, images: [] });
   state.activeProject = state.projects.length - 1;
   state.activeImage = 0;
+  if (autoRename) _pendingRename = 'project';
   save();
   render();
 }
@@ -567,12 +571,14 @@ function addImageToProject(file) {
   if (!currentProject()) createProject('Project 1');
   const reader = new FileReader();
   reader.onload = e => {
+    const nameWithoutExt = file.name.replace(/\.[^.]+$/, '') || 'image';
     currentProject().images.push({
-      name: file.name,
+      name: nameWithoutExt,
       dataUrl: e.target.result,
       lines: []
     });
     state.activeImage = currentProject().images.length - 1;
+    _pendingRename = 'image';
     save();
     render();
   };
@@ -586,7 +592,7 @@ function switchImage(idx) {
 }
 
 function renameImage(projIdx, imgIdx, newName) {
-  state.projects[projIdx].images[imgIdx].name = newName.trim() || 'image';
+  state.projects[projIdx].images[imgIdx].name = newName.trim().replace(/\.[^.]+$/, '') || 'image';
   save();
   renderImageList();
 }
@@ -597,6 +603,14 @@ function removeImage(projIdx, imgIdx) {
   save();
   render();
 }
+
+// ─── Filename helper ──────────────────────────────────────────────────────────
+function safeFilename(name) {
+  return (name || 'unnamed').trim().replace(/[/\\:*?"<>|]/g, '_');
+}
+
+// Pending auto-rename after next render
+let _pendingRename = null; // 'project' | 'image'
 
 // ─── Inline rename helper ────────────────────────────────────────────────────
 function startRename(nameSpan, onCommit) {
@@ -643,6 +657,15 @@ function renderProjectList() {
       startRename(nameSpan, val => renameProject(i, val));
     });
 
+    const editBtn = document.createElement('span');
+    editBtn.className = 'item-edit';
+    editBtn.textContent = '✎';
+    editBtn.title = 'Rename project';
+    editBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      startRename(nameSpan, val => renameProject(i, val));
+    });
+
     const removeBtn = document.createElement('span');
     removeBtn.className = 'item-remove';
     removeBtn.textContent = '×';
@@ -653,10 +676,20 @@ function renderProjectList() {
     });
 
     li.appendChild(nameSpan);
+    li.appendChild(editBtn);
     li.appendChild(removeBtn);
     li.addEventListener('click', () => switchProject(i));
     projectList.appendChild(li);
   });
+
+  if (_pendingRename === 'project') {
+    _pendingRename = null;
+    const activeItem = projectList.children[state.activeProject];
+    if (activeItem) {
+      const nameSpan = activeItem.querySelector('.item-name');
+      if (nameSpan) startRename(nameSpan, val => renameProject(state.activeProject, val));
+    }
+  }
 }
 
 function renderImageList() {
@@ -682,6 +715,15 @@ function renderImageList() {
       startRename(nameSpan, val => renameImage(state.activeProject, i, val));
     });
 
+    const editBtn = document.createElement('span');
+    editBtn.className = 'item-edit';
+    editBtn.textContent = '✎';
+    editBtn.title = 'Rename image';
+    editBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      startRename(nameSpan, val => renameImage(state.activeProject, i, val));
+    });
+
     const removeBtn = document.createElement('span');
     removeBtn.className = 'item-remove';
     removeBtn.textContent = '×';
@@ -693,10 +735,20 @@ function renderImageList() {
 
     li.appendChild(thumb);
     li.appendChild(nameSpan);
+    li.appendChild(editBtn);
     li.appendChild(removeBtn);
     li.addEventListener('click', () => switchImage(i));
     imageList.appendChild(li);
   });
+
+  if (_pendingRename === 'image') {
+    _pendingRename = null;
+    const activeItem = imageList.children[state.activeImage];
+    if (activeItem) {
+      const nameSpan = activeItem.querySelector('.item-name');
+      if (nameSpan) startRename(nameSpan, val => renameImage(state.activeProject, state.activeImage, val));
+    }
+  }
 }
 
 function renderEditor() {
@@ -863,7 +915,8 @@ function renderSlices() {
   sliceCountEl.textContent = String(sliceCount);
   emptyRight.style.display = 'none';
 
-  const baseName = img.name.replace(/\.[^.]+$/, '') || 'image';
+  const projName = safeFilename(currentProject()?.name || 'project');
+  const baseName = safeFilename(img.name || 'image');
 
   const bitmapImg = new Image();
   bitmapImg.src = img.dataUrl;
@@ -898,7 +951,7 @@ function renderSlices() {
       dlBtn.addEventListener('click', () => {
         const a = document.createElement('a');
         a.href     = canvas.toDataURL('image/png');
-        a.download = `${baseName}-slice-${i + 1}.png`;
+        a.download = `${projName}-${baseName}-slice-${i + 1}.png`;
         a.click();
       });
 
@@ -954,7 +1007,7 @@ document.addEventListener('paste', e => {
 });
 
 btnNewProject.addEventListener('click', () => {
-  createProject(`Project ${state.projects.length + 1}`);
+  createProject(`Project ${state.projects.length + 1}`, { autoRename: true });
 });
 
 window.addEventListener('resize', () => {
