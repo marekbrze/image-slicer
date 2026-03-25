@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Slicer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #111;
+    color: #e0e0e0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #2a2a2a;
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.02em;
+  }
+
+  header .spacer { flex: 1; }
+
+  .hint {
+    font-size: 12px;
+    color: #666;
+  }
+
+  .btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.15s;
+  }
+
+  .btn-primary {
+    background: #3b82f6;
+    color: #fff;
+  }
+  .btn-primary:hover { background: #2563eb; }
+
+  .btn-ghost {
+    background: transparent;
+    color: #999;
+    border: 1px solid #333;
+  }
+  .btn-ghost:hover { background: #222; color: #ccc; }
+
+  .btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 4px;
+  }
+
+  /* ── Main layout ── */
+  main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Panels ── */
+  .panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 8px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #555;
+    background: #161616;
+    border-bottom: 1px solid #222;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .panel-header .count {
+    background: #2a2a2a;
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 11px;
+    color: #888;
+  }
+
+  .divider {
+    width: 1px;
+    background: #222;
+    flex-shrink: 0;
+  }
+
+  .panel-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px;
+  }
+
+  /* ── Drop zone / empty state ── */
+  .drop-zone {
+    border: 2px dashed #2a2a2a;
+    border-radius: 12px;
+    padding: 60px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    user-select: none;
+  }
+
+  .drop-zone:hover,
+  .drop-zone.drag-over {
+    border-color: #3b82f6;
+    background: rgba(59,130,246,0.05);
+  }
+
+  .drop-zone svg {
+    width: 40px;
+    height: 40px;
+    color: #444;
+    margin-bottom: 14px;
+  }
+
+  .drop-zone p {
+    font-size: 14px;
+    color: #555;
+    margin-bottom: 6px;
+  }
+
+  .drop-zone small {
+    font-size: 12px;
+    color: #3a3a3a;
+  }
+
+  /* ── Image editor (left panel) ── */
+  #editor-wrap {
+    position: relative;
+    display: inline-block;
+    cursor: crosshair;
+    user-select: none;
+    line-height: 0;
+  }
+
+  #editor-wrap img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    pointer-events: none;
+  }
+
+  /* ── Slice lines ── */
+  .slice-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #f43f5e;
+    cursor: ns-resize;
+    z-index: 10;
+  }
+
+  .slice-line::before {
+    /* expanded hit area */
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    top: -6px; bottom: -6px;
+  }
+
+  .slice-line .line-handle {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: #f43f5e;
+    color: #fff;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+    line-height: 1.6;
+    pointer-events: all;
+  }
+
+  .slice-line .line-label {
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(244,63,94,0.85);
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    line-height: 1.6;
+    pointer-events: none;
+  }
+
+  /* ── Right panel slices ── */
+  .slice-item {
+    margin-bottom: 16px;
+    background: #1a1a1a;
+    border: 1px solid #222;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .slice-item-header {
+    display: flex;
+    align-items: center;
+    padding: 7px 10px;
+    background: #161616;
+    border-bottom: 1px solid #222;
+    gap: 8px;
+  }
+
+  .slice-item-header span {
+    font-size: 11px;
+    color: #666;
+    flex: 1;
+  }
+
+  .slice-item canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* ── Scrollbars ── */
+  .panel-body::-webkit-scrollbar { width: 6px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+
+  /* ── Empty right panel ── */
+  .empty-right {
+    color: #3a3a3a;
+    font-size: 13px;
+    text-align: center;
+    padding: 60px 20px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Image Slicer</h1>
+  <span class="hint">Click on image to add cut lines · Drag to move · Double-click to remove</span>
+  <span class="spacer"></span>
+  <button class="btn btn-ghost btn-sm" id="btn-clear" style="display:none">Clear</button>
+  <button class="btn btn-primary btn-sm" id="btn-upload">Upload image</button>
+  <input type="file" id="file-input" accept="image/*" style="display:none">
+</header>
+
+<main>
+  <!-- LEFT PANEL -->
+  <div class="panel" id="left-panel">
+    <div class="panel-header">
+      Original
+      <span class="count" id="line-count">0 lines</span>
+    </div>
+    <div class="panel-body" id="left-body">
+      <!-- Drop zone shown when no image -->
+      <div class="drop-zone" id="drop-zone">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 20M14 8h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        <p>Drop image here or click to upload</p>
+        <small>Also works with Ctrl+V paste</small>
+      </div>
+      <!-- Editor shown when image is loaded -->
+      <div id="editor-wrap" style="display:none">
+        <img id="source-img" alt="screenshot">
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- RIGHT PANEL -->
+  <div class="panel" id="right-panel">
+    <div class="panel-header">
+      Slices
+      <span class="count" id="slice-count">0</span>
+    </div>
+    <div class="panel-body" id="right-body">
+      <div class="empty-right" id="empty-right">Load an image and add cut lines to see slices</div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const state = {
+  imageDataUrl: null,
+  // lines stored as fractions (0..1) of original image height
+  lines: []
+};
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+const fileInput      = document.getElementById('file-input');
+const btnUpload      = document.getElementById('btn-upload');
+const btnClear       = document.getElementById('btn-clear');
+const dropZone       = document.getElementById('drop-zone');
+const editorWrap     = document.getElementById('editor-wrap');
+const sourceImg      = document.getElementById('source-img');
+const rightBody      = document.getElementById('right-body');
+const lineCountEl    = document.getElementById('line-count');
+const sliceCountEl   = document.getElementById('slice-count');
+const emptyRight     = document.getElementById('empty-right');
+
+// ─── Persistence ──────────────────────────────────────────────────────────────
+function save() {
+  try {
+    localStorage.setItem('slicer_image', state.imageDataUrl || '');
+    localStorage.setItem('slicer_lines', JSON.stringify(state.lines));
+  } catch (e) {
+    // storage quota exceeded (large images) — ignore
+  }
+}
+
+function load() {
+  const img   = localStorage.getItem('slicer_image');
+  const lines = localStorage.getItem('slicer_lines');
+  if (img) {
+    state.imageDataUrl = img;
+    state.lines = lines ? JSON.parse(lines) : [];
+    applyImage();
+  }
+}
+
+// ─── Image loading ────────────────────────────────────────────────────────────
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    state.imageDataUrl = e.target.result;
+    state.lines = [];
+    save();
+    applyImage();
+  };
+  reader.readAsDataURL(file);
+}
+
+function applyImage() {
+  sourceImg.onload = () => {
+    dropZone.style.display  = 'none';
+    editorWrap.style.display = 'inline-block';
+    btnClear.style.display  = '';
+    renderLines();
+    renderSlices();
+  };
+  sourceImg.src = state.imageDataUrl;
+}
+
+// ─── Lines rendering ──────────────────────────────────────────────────────────
+function renderLines() {
+  // Remove old line elements
+  editorWrap.querySelectorAll('.slice-line').forEach(el => el.remove());
+
+  const imgH = sourceImg.offsetHeight;
+
+  state.lines.forEach((frac, idx) => {
+    const top = frac * imgH;
+    const line = document.createElement('div');
+    line.className = 'slice-line';
+    line.style.top = top + 'px';
+    line.dataset.idx = idx;
+
+    const label = document.createElement('span');
+    label.className = 'line-label';
+    label.textContent = `${idx + 1}`;
+    line.appendChild(label);
+
+    const handle = document.createElement('span');
+    handle.className = 'line-handle';
+    handle.textContent = '× remove';
+    handle.title = 'Double-click line to remove';
+    handle.addEventListener('click', e => {
+      e.stopPropagation();
+      removeLine(idx);
+    });
+    line.appendChild(handle);
+
+    makeDraggable(line, idx);
+    editorWrap.appendChild(line);
+  });
+
+  const n = state.lines.length;
+  lineCountEl.textContent = n === 1 ? '1 line' : `${n} lines`;
+}
+
+// ─── Dragging lines ───────────────────────────────────────────────────────────
+function makeDraggable(lineEl, idx) {
+  let startY, startFrac, dragging = false;
+
+  lineEl.addEventListener('mousedown', e => {
+    if (e.target.classList.contains('line-handle')) return;
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    startFrac = state.lines[idx];
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  lineEl.addEventListener('dblclick', e => {
+    e.stopPropagation();
+    removeLine(idx);
+  });
+
+  function onMove(e) {
+    if (!dragging) return;
+    const imgH = sourceImg.offsetHeight;
+    const delta = e.clientY - startY;
+    let newFrac = startFrac + delta / imgH;
+    newFrac = Math.max(0.001, Math.min(0.999, newFrac));
+    state.lines[idx] = newFrac;
+    lineEl.style.top = (newFrac * imgH) + 'px';
+    renderSlices();
+  }
+
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    state.lines.sort((a, b) => a - b);
+    save();
+    renderLines();
+    renderSlices();
+  }
+}
+
+// ─── Add / remove lines ───────────────────────────────────────────────────────
+function addLine(frac) {
+  state.lines.push(frac);
+  state.lines.sort((a, b) => a - b);
+  save();
+  renderLines();
+  renderSlices();
+}
+
+function removeLine(idx) {
+  state.lines.splice(idx, 1);
+  save();
+  renderLines();
+  renderSlices();
+}
+
+// Click on image → add line
+editorWrap.addEventListener('click', e => {
+  if (e.target.classList.contains('slice-line') ||
+      e.target.classList.contains('line-handle') ||
+      e.target.classList.contains('line-label')) return;
+  const rect = editorWrap.getBoundingClientRect();
+  const y    = e.clientY - rect.top;
+  const frac = y / sourceImg.offsetHeight;
+  if (frac > 0.001 && frac < 0.999) addLine(frac);
+});
+
+// ─── Slices rendering ─────────────────────────────────────────────────────────
+function renderSlices() {
+  if (!state.imageDataUrl) return;
+
+  const imgEl  = sourceImg;
+  const origW  = imgEl.naturalWidth;
+  const origH  = imgEl.naturalHeight;
+
+  // Build cut points in original pixels
+  const cuts = [0, ...state.lines.map(f => Math.round(f * origH)), origH];
+
+  // Clear right panel
+  rightBody.innerHTML = '';
+
+  if (cuts.length < 2) {
+    rightBody.appendChild(emptyRight);
+    sliceCountEl.textContent = '0';
+    return;
+  }
+
+  const sliceCount = cuts.length - 1;
+  sliceCountEl.textContent = String(sliceCount);
+  emptyRight.style.display = 'none';
+
+  // We need the actual image bitmap for canvas drawing
+  const bitmapImg = new Image();
+  bitmapImg.src = state.imageDataUrl;
+
+  const draw = () => {
+    for (let i = 0; i < sliceCount; i++) {
+      const srcY = cuts[i];
+      const srcH = cuts[i + 1] - cuts[i];
+      if (srcH <= 0) continue;
+
+      const item = document.createElement('div');
+      item.className = 'slice-item';
+
+      const hdr = document.createElement('div');
+      hdr.className = 'slice-item-header';
+
+      const label = document.createElement('span');
+      label.textContent = `Slice ${i + 1} — ${origW} × ${srcH}px`;
+      hdr.appendChild(label);
+
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'btn btn-ghost btn-sm';
+      dlBtn.textContent = '↓ Download';
+      hdr.appendChild(dlBtn);
+
+      const canvas = document.createElement('canvas');
+      canvas.width  = origW;
+      canvas.height = srcH;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmapImg, 0, srcY, origW, srcH, 0, 0, origW, srcH);
+
+      dlBtn.addEventListener('click', () => {
+        const a = document.createElement('a');
+        a.href     = canvas.toDataURL('image/png');
+        a.download = `slice-${i + 1}.png`;
+        a.click();
+      });
+
+      item.appendChild(hdr);
+      item.appendChild(canvas);
+      rightBody.appendChild(item);
+    }
+  };
+
+  if (bitmapImg.complete) {
+    draw();
+  } else {
+    bitmapImg.onload = draw;
+  }
+}
+
+// ─── Upload controls ──────────────────────────────────────────────────────────
+btnUpload.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => loadFile(fileInput.files[0]));
+
+dropZone.addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  loadFile(e.dataTransfer.files[0]);
+});
+
+// Drag & drop onto editor wrap (when image already loaded)
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  loadFile(e.dataTransfer.files[0]);
+});
+
+// Paste
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      loadFile(item.getAsFile());
+      break;
+    }
+  }
+});
+
+// Clear
+btnClear.addEventListener('click', () => {
+  state.imageDataUrl = null;
+  state.lines = [];
+  localStorage.removeItem('slicer_image');
+  localStorage.removeItem('slicer_lines');
+  editorWrap.style.display = 'none';
+  dropZone.style.display = '';
+  btnClear.style.display = 'none';
+  rightBody.innerHTML = '';
+  rightBody.appendChild(emptyRight);
+  emptyRight.style.display = '';
+  lineCountEl.textContent  = '0 lines';
+  sliceCountEl.textContent = '0';
+});
+
+// Re-render lines when window resizes (they're position-dependent on display size)
+window.addEventListener('resize', () => {
+  if (state.imageDataUrl) renderLines();
+});
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+load();
+</script>
+</body>
+</html>
