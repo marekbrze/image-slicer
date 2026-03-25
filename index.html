@@ -360,10 +360,34 @@
     gap: 8px;
   }
 
-  .slice-item-header span {
+  .slice-item-header .slice-dims {
     font-size: 11px;
-    color: #666;
+    color: #444;
+    flex-shrink: 0;
+  }
+
+  .slice-item-header .slice-name {
+    font-size: 12px;
+    color: #999;
     flex: 1;
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 1px 4px;
+    margin-left: -4px;
+  }
+  .slice-item-header .slice-name:hover { background: #222; color: #e0e0e0; }
+
+  .slice-item-header .slice-name-input {
+    flex: 1;
+    background: #2a2a2a;
+    border: 1px solid #3b82f6;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    padding: 1px 4px;
+    outline: none;
+    min-width: 0;
+    margin-left: -4px;
   }
 
   .slice-item canvas {
@@ -636,6 +660,32 @@ function startRename(nameSpan, onCommit) {
   input.addEventListener('blur', commit);
 }
 
+function startSliceRename(nameSpan, sliceIdx) {
+  const img = currentImage();
+  if (!img) return;
+  const current = img.sliceNames[sliceIdx] || '';
+  const input = document.createElement('input');
+  input.className = 'slice-name-input';
+  input.value = current;
+  input.placeholder = `Slice ${sliceIdx + 1}`;
+  nameSpan.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let committed = false;
+  function commit() {
+    if (committed) return;
+    committed = true;
+    renameSlice(sliceIdx, input.value);
+  }
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { committed = true; renameSlice(sliceIdx, current); }
+  });
+  input.addEventListener('blur', commit);
+}
+
 // ─── Render coordinator ───────────────────────────────────────────────────────
 function render() {
   renderProjectList();
@@ -861,12 +911,32 @@ function makeDraggable(lineEl, idx) {
   }
 }
 
+// ─── Slice names helpers ──────────────────────────────────────────────────────
+function ensureSliceNames(img) {
+  if (!img.sliceNames) img.sliceNames = [];
+  const needed = img.lines.length + 1;
+  while (img.sliceNames.length < needed) img.sliceNames.push('');
+  if (img.sliceNames.length > needed) img.sliceNames.length = needed;
+}
+
+function renameSlice(sliceIdx, newName) {
+  const img = currentImage();
+  if (!img) return;
+  ensureSliceNames(img);
+  img.sliceNames[sliceIdx] = newName.trim();
+  save();
+  renderSlices();
+}
+
 // ─── Add / remove lines ───────────────────────────────────────────────────────
 function addLine(frac) {
   const img = currentImage();
   if (!img) return;
+  ensureSliceNames(img);                         // sync before adding
   img.lines.push(frac);
   img.lines.sort((a, b) => a - b);
+  const newIdx = img.lines.indexOf(frac);
+  img.sliceNames.splice(newIdx + 1, 0, '');      // insert blank name for new slice
   save();
   renderLines();
   renderSlices();
@@ -875,7 +945,9 @@ function addLine(frac) {
 function removeLine(idx) {
   const img = currentImage();
   if (!img) return;
+  ensureSliceNames(img);
   img.lines.splice(idx, 1);
+  img.sliceNames.splice(idx + 1, 1);             // remove name of the slice after the line
   save();
   renderLines();
   renderSlices();
@@ -917,6 +989,7 @@ function renderSlices() {
 
   const projName = safeFilename(currentProject()?.name || 'project');
   const baseName = safeFilename(img.name || 'image');
+  ensureSliceNames(img);
 
   const bitmapImg = new Image();
   bitmapImg.src = img.dataUrl;
@@ -933,9 +1006,19 @@ function renderSlices() {
       const hdr = document.createElement('div');
       hdr.className = 'slice-item-header';
 
-      const label = document.createElement('span');
-      label.textContent = `Slice ${i + 1} — ${origW} × ${srcH}px`;
-      hdr.appendChild(label);
+      // Editable slice name
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'slice-name';
+      const customName = img.sliceNames[i] || '';
+      nameSpan.textContent = customName || `Slice ${i + 1}`;
+      nameSpan.title = 'Click to rename';
+      nameSpan.addEventListener('click', () => startSliceRename(nameSpan, i));
+      hdr.appendChild(nameSpan);
+
+      const dims = document.createElement('span');
+      dims.className = 'slice-dims';
+      dims.textContent = `${origW} × ${srcH}px`;
+      hdr.appendChild(dims);
 
       const dlBtn = document.createElement('button');
       dlBtn.className = 'btn btn-ghost btn-sm';
@@ -949,9 +1032,13 @@ function renderSlices() {
       ctx.drawImage(bitmapImg, 0, srcY, origW, srcH, 0, 0, origW, srcH);
 
       dlBtn.addEventListener('click', () => {
+        const sliceName = img.sliceNames[i];
+        const filename = sliceName
+          ? `${projName}-${baseName}-${safeFilename(sliceName)}.png`
+          : `${projName}-${baseName}-slice-${i + 1}.png`;
         const a = document.createElement('a');
         a.href     = canvas.toDataURL('image/png');
-        a.download = `${projName}-${baseName}-slice-${i + 1}.png`;
+        a.download = filename;
         a.click();
       });
 
