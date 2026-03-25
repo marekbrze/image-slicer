@@ -1042,6 +1042,24 @@ function renderSlices() {
         a.click();
       });
 
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'btn btn-ghost btn-sm';
+      copyBtn.textContent = '⎘ Copy';
+      copyBtn.addEventListener('click', () => {
+        canvas.toBlob(blob => {
+          navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]).then(() => {
+            copyBtn.textContent = '✓ Copied';
+            setTimeout(() => { copyBtn.textContent = '⎘ Copy'; }, 1500);
+          }).catch(() => {
+            copyBtn.textContent = '✗ Failed';
+            setTimeout(() => { copyBtn.textContent = '⎘ Copy'; }, 1500);
+          });
+        });
+      });
+      hdr.appendChild(copyBtn);
+
       item.appendChild(hdr);
       item.appendChild(canvas);
       rightBody.appendChild(item);
