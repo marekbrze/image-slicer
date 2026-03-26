@@ -564,7 +564,8 @@ const state = {
   projects: [],
   activeProject: 0,
   activeImage: 0,
-  sidebarWidth: 190
+  sidebarWidth: 190,
+  nextImageId: 1
 };
 
 function currentProject() {
@@ -637,44 +638,132 @@ const emptyRight      = document.getElementById('empty-right');
 const sidebar         = document.getElementById('sidebar');
 const sidebarResizer  = document.getElementById('sidebar-resizer');
 
-// ─── Persistence ──────────────────────────────────────────────────────────────
-function save() {
-  try {
-    localStorage.setItem('slicer_v2', JSON.stringify(state));
-  } catch (e) {
-    // storage quota exceeded (large images) — ignore
-  }
+// ─── IndexedDB helpers ────────────────────────────────────────────────────────
+let _db = null;
+
+function openDb() {
+  if (_db) return Promise.resolve(_db);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('image-slicer', 1);
+    req.onupgradeneeded = e => {
+      e.target.result.createObjectStore('images', { keyPath: 'id' });
+    };
+    req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+    req.onerror   = e => reject(e.target.error);
+  });
 }
 
-function load() {
-  // Try new format
+function idbGetAll(ids) {
+  return openDb().then(db => new Promise((resolve, reject) => {
+    if (ids.length === 0) return resolve(new Map());
+    const tx    = db.transaction('images', 'readonly');
+    const store = tx.objectStore('images');
+    const result = new Map();
+    let pending  = ids.length;
+    ids.forEach(id => {
+      const req = store.get(id);
+      req.onsuccess = e => {
+        if (e.target.result) result.set(id, e.target.result.dataUrl);
+        if (--pending === 0) resolve(result);
+      };
+      req.onerror = e => reject(e.target.error);
+    });
+  }));
+}
+
+function idbPutAll(entries) {
+  return openDb().then(db => new Promise((resolve, reject) => {
+    if (entries.length === 0) return resolve();
+    const tx    = db.transaction('images', 'readwrite');
+    const store = tx.objectStore('images');
+    entries.forEach(e => store.put(e));
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  }));
+}
+
+function idbDeleteAll(ids) {
+  return openDb().then(db => new Promise((resolve, reject) => {
+    if (ids.length === 0) return resolve();
+    const tx    = db.transaction('images', 'readwrite');
+    const store = tx.objectStore('images');
+    ids.forEach(id => store.delete(id));
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  }));
+}
+
+// ─── Persistence ──────────────────────────────────────────────────────────────
+function save() {
+  const stripped = {
+    ...state,
+    projects: state.projects.map(proj => ({
+      ...proj,
+      images: proj.images.map(img => {
+        const { dataUrl, ...rest } = img;
+        return rest;
+      })
+    }))
+  };
+  try {
+    localStorage.setItem('slicer_v2', JSON.stringify(stripped));
+  } catch (e) {}
+
+  const entries = [];
+  state.projects.forEach(proj => {
+    proj.images.forEach(img => {
+      if (img.id != null && img.dataUrl) entries.push({ id: img.id, dataUrl: img.dataUrl });
+    });
+  });
+  idbPutAll(entries).catch(() => {});
+}
+
+async function load() {
+  // 1. Wczytaj state z localStorage
   const raw = localStorage.getItem('slicer_v2');
   if (raw) {
-    try {
-      const saved = JSON.parse(raw);
-      Object.assign(state, saved);
-      return;
-    } catch (e) {}
+    try { Object.assign(state, JSON.parse(raw)); } catch (e) {}
   }
 
-  // Migrate from old format
-  const oldImg   = localStorage.getItem('slicer_image');
-  const oldLines = localStorage.getItem('slicer_lines');
-  if (oldImg) {
-    state.projects = [{
-      name: 'Project 1',
-      images: [{
-        name: 'image',
-        dataUrl: oldImg,
-        lines: oldLines ? JSON.parse(oldLines) : []
-      }]
-    }];
-    state.activeProject = 0;
-    state.activeImage = 0;
-    localStorage.removeItem('slicer_image');
-    localStorage.removeItem('slicer_lines');
+  // 2. Migracja legacy v1 (slicer_image / slicer_lines)
+  if (!raw) {
+    const oldImg   = localStorage.getItem('slicer_image');
+    const oldLines = localStorage.getItem('slicer_lines');
+    if (oldImg) {
+      const id = state.nextImageId++;
+      state.projects = [{ name: 'Project 1', images: [
+        { id, name: 'image', lines: oldLines ? JSON.parse(oldLines) : [],
+          trimLeft: 0, trimRight: 1, sliceTrimDisabled: [] }
+      ]}];
+      state.activeProject = 0;
+      state.activeImage   = 0;
+      await idbPutAll([{ id, dataUrl: oldImg }]).catch(() => {});
+      localStorage.removeItem('slicer_image');
+      localStorage.removeItem('slicer_lines');
+      save();
+    }
+  }
+
+  // 3. Migracja slicer_v2 z embedded dataUrls (jednorazowa, stary format)
+  const allImages = state.projects.flatMap(p => p.images);
+  const withEmbedded = allImages.filter(img => img.dataUrl && img.id == null);
+  if (withEmbedded.length > 0) {
+    const entries = [];
+    withEmbedded.forEach(img => {
+      img.id = state.nextImageId++;
+      entries.push({ id: img.id, dataUrl: img.dataUrl });
+      delete img.dataUrl;
+    });
+    await idbPutAll(entries).catch(() => {});
     save();
   }
+
+  // 4. Wczytaj dataUrls z IndexedDB i dołącz do obiektów
+  const ids = allImages.filter(img => img.id != null).map(img => img.id);
+  const dataUrlMap = await idbGetAll(ids).catch(() => new Map());
+  allImages.forEach(img => {
+    if (img.id != null && dataUrlMap.has(img.id)) img.dataUrl = dataUrlMap.get(img.id);
+  });
 }
 
 // ─── Project operations ───────────────────────────────────────────────────────
@@ -701,11 +790,15 @@ function renameProject(idx, newName) {
 }
 
 function removeProject(idx) {
+  const removedIds = state.projects[idx].images
+    .filter(img => img.id != null)
+    .map(img => img.id);
   state.projects.splice(idx, 1);
   if (state.projects.length === 0) {
     state.projects.push({ name: 'Project 1', images: [] });
   }
   ensureActiveIndicesValid();
+  if (removedIds.length > 0) idbDeleteAll(removedIds).catch(() => {});
   save();
   render();
 }
@@ -717,7 +810,9 @@ function addImageToProject(file) {
   const reader = new FileReader();
   reader.onload = e => {
     const nameWithoutExt = file.name.replace(/\.[^.]+$/, '') || 'image';
+    const id = state.nextImageId++;
     currentProject().images.push({
+      id,
       name: nameWithoutExt,
       dataUrl: e.target.result,
       lines: [],
@@ -746,8 +841,10 @@ function renameImage(projIdx, imgIdx, newName) {
 }
 
 function removeImage(projIdx, imgIdx) {
+  const removedId = state.projects[projIdx].images[imgIdx]?.id;
   state.projects[projIdx].images.splice(imgIdx, 1);
   ensureActiveIndicesValid();
+  if (removedId != null) idbDeleteAll([removedId]).catch(() => {});
   save();
   render();
 }
@@ -1497,12 +1594,14 @@ sidebarResizer.addEventListener('mousedown', e => {
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
-if (state.projects.length === 0) {
-  state.projects.push({ name: 'Project 1', images: [] });
-}
-load();
-sidebar.style.width = (state.sidebarWidth || 190) + 'px';
-render();
+(async () => {
+  if (state.projects.length === 0) {
+    state.projects.push({ name: 'Project 1', images: [] });
+  }
+  await load();
+  sidebar.style.width = (state.sidebarWidth || 190) + 'px';
+  render();
+})();
 </script>
 </body>
 </html>
