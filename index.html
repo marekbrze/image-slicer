@@ -190,6 +190,32 @@
     flex-shrink: 0;
   }
 
+  .sidebar-item .drag-handle {
+    opacity: 0;
+    color: #444;
+    cursor: grab;
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 0 2px;
+    line-height: 1;
+    user-select: none;
+  }
+  .sidebar-item:hover .drag-handle { opacity: 1; }
+  .sidebar-item.dragging { opacity: 0.35; }
+  .sidebar-item.drag-over-above { border-top: 2px solid #3b82f6; }
+  .sidebar-item.drag-over-below { border-bottom: 2px solid #3b82f6; }
+
+  /* Sidebar resize handle */
+  #sidebar-resizer {
+    width: 4px;
+    flex-shrink: 0;
+    background: #222;
+    cursor: ew-resize;
+    transition: background 0.15s;
+  }
+  #sidebar-resizer:hover,
+  #sidebar-resizer.resizing { background: #3b82f6; }
+
   /* Scrollbars in sidebar */
   #project-list::-webkit-scrollbar,
   #image-list::-webkit-scrollbar { width: 4px; }
@@ -494,7 +520,7 @@
     <ul id="image-list"></ul>
   </div>
 
-  <div class="divider"></div>
+  <div id="sidebar-resizer"></div>
 
   <!-- LEFT PANEL -->
   <div class="panel" id="left-panel">
@@ -537,7 +563,8 @@
 const state = {
   projects: [],
   activeProject: 0,
-  activeImage: 0
+  activeImage: 0,
+  sidebarWidth: 190
 };
 
 function currentProject() {
@@ -558,6 +585,40 @@ function ensureActiveIndicesValid() {
   }
 }
 
+// ─── Drag-to-reorder state ────────────────────────────────────────────────────
+let dragType = null;   // 'project' | 'image'
+let dragFrom = null;   // source index
+
+function moveProject(from, to) {
+  if (from === to) return;
+  const [item] = state.projects.splice(from, 1);
+  state.projects.splice(to, 0, item);
+  if (state.activeProject === from) {
+    state.activeProject = to;
+  } else if (from < state.activeProject && to >= state.activeProject) {
+    state.activeProject--;
+  } else if (from > state.activeProject && to <= state.activeProject) {
+    state.activeProject++;
+  }
+  save(); render();
+}
+
+function moveImage(from, to) {
+  if (from === to) return;
+  const proj = currentProject();
+  if (!proj) return;
+  const [item] = proj.images.splice(from, 1);
+  proj.images.splice(to, 0, item);
+  if (state.activeImage === from) {
+    state.activeImage = to;
+  } else if (from < state.activeImage && to >= state.activeImage) {
+    state.activeImage--;
+  } else if (from > state.activeImage && to <= state.activeImage) {
+    state.activeImage++;
+  }
+  save(); render();
+}
+
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
 const fileInput       = document.getElementById('file-input');
 const btnUpload       = document.getElementById('btn-upload');
@@ -573,6 +634,8 @@ const rightBody       = document.getElementById('right-body');
 const lineCountEl     = document.getElementById('line-count');
 const sliceCountEl    = document.getElementById('slice-count');
 const emptyRight      = document.getElementById('empty-right');
+const sidebar         = document.getElementById('sidebar');
+const sidebarResizer  = document.getElementById('sidebar-resizer');
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
 function save() {
@@ -759,6 +822,12 @@ function renderProjectList() {
   state.projects.forEach((proj, i) => {
     const li = document.createElement('li');
     li.className = 'sidebar-item' + (i === state.activeProject ? ' active' : '');
+    li.draggable = true;
+
+    const handle = document.createElement('span');
+    handle.className = 'drag-handle';
+    handle.textContent = '⠿';
+    handle.addEventListener('mousedown', e => e.stopPropagation());
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'item-name';
@@ -786,6 +855,42 @@ function renderProjectList() {
       removeProject(i);
     });
 
+    li.addEventListener('dragstart', e => {
+      dragType = 'project'; dragFrom = i;
+      li.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', '');
+    });
+    li.addEventListener('dragend', () => {
+      dragType = null; dragFrom = null;
+      document.querySelectorAll('#project-list .sidebar-item').forEach(el => {
+        el.classList.remove('dragging', 'drag-over-above', 'drag-over-below');
+      });
+    });
+    li.addEventListener('dragover', e => {
+      if (dragType !== 'project') return;
+      e.preventDefault(); e.stopPropagation();
+      const rect = li.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      document.querySelectorAll('#project-list .sidebar-item').forEach(el => {
+        el.classList.remove('drag-over-above', 'drag-over-below');
+      });
+      li.classList.add(e.clientY < mid ? 'drag-over-above' : 'drag-over-below');
+    });
+    li.addEventListener('dragleave', () => {
+      li.classList.remove('drag-over-above', 'drag-over-below');
+    });
+    li.addEventListener('drop', e => {
+      if (dragType !== 'project') return;
+      e.preventDefault(); e.stopPropagation();
+      const rect = li.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      let to = e.clientY < mid ? i : i + 1;
+      if (dragFrom < to) to--;
+      moveProject(dragFrom, to);
+    });
+
+    li.appendChild(handle);
     li.appendChild(nameSpan);
     li.appendChild(editBtn);
     li.appendChild(removeBtn);
@@ -812,6 +917,12 @@ function renderImageList() {
   proj.images.forEach((img, i) => {
     const li = document.createElement('li');
     li.className = 'sidebar-item' + (i === state.activeImage ? ' active' : '');
+    li.draggable = true;
+
+    const handle = document.createElement('span');
+    handle.className = 'drag-handle';
+    handle.textContent = '⠿';
+    handle.addEventListener('mousedown', e => e.stopPropagation());
 
     const thumb = document.createElement('img');
     thumb.className = 'item-thumb';
@@ -844,6 +955,42 @@ function renderImageList() {
       removeImage(state.activeProject, i);
     });
 
+    li.addEventListener('dragstart', e => {
+      dragType = 'image'; dragFrom = i;
+      li.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', '');
+    });
+    li.addEventListener('dragend', () => {
+      dragType = null; dragFrom = null;
+      document.querySelectorAll('#image-list .sidebar-item').forEach(el => {
+        el.classList.remove('dragging', 'drag-over-above', 'drag-over-below');
+      });
+    });
+    li.addEventListener('dragover', e => {
+      if (dragType !== 'image') return;
+      e.preventDefault(); e.stopPropagation();
+      const rect = li.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      document.querySelectorAll('#image-list .sidebar-item').forEach(el => {
+        el.classList.remove('drag-over-above', 'drag-over-below');
+      });
+      li.classList.add(e.clientY < mid ? 'drag-over-above' : 'drag-over-below');
+    });
+    li.addEventListener('dragleave', () => {
+      li.classList.remove('drag-over-above', 'drag-over-below');
+    });
+    li.addEventListener('drop', e => {
+      if (dragType !== 'image') return;
+      e.preventDefault(); e.stopPropagation();
+      const rect = li.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      let to = e.clientY < mid ? i : i + 1;
+      if (dragFrom < to) to--;
+      moveImage(dragFrom, to);
+    });
+
+    li.appendChild(handle);
     li.appendChild(thumb);
     li.appendChild(nameSpan);
     li.appendChild(editBtn);
@@ -1304,6 +1451,7 @@ dropZone.addEventListener('drop', e => {
 document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => {
   e.preventDefault();
+  if (dragType) return; // sidebar reorder in progress
   addImageToProject(e.dataTransfer.files[0]);
 });
 
@@ -1326,11 +1474,34 @@ window.addEventListener('resize', () => {
   if (currentImage()) { renderLines(); renderTrimHandles(); }
 });
 
+// ─── Sidebar resize ───────────────────────────────────────────────────────────
+const SIDEBAR_MIN = 130, SIDEBAR_MAX = 380;
+sidebarResizer.addEventListener('mousedown', e => {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = sidebar.offsetWidth;
+  sidebarResizer.classList.add('resizing');
+  function onMove(e) {
+    const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + e.clientX - startX));
+    sidebar.style.width = w + 'px';
+  }
+  function onUp() {
+    sidebarResizer.classList.remove('resizing');
+    state.sidebarWidth = sidebar.offsetWidth;
+    save();
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 if (state.projects.length === 0) {
   state.projects.push({ name: 'Project 1', images: [] });
 }
 load();
+sidebar.style.width = (state.sidebarWidth || 190) + 'px';
 render();
 </script>
 </body>
